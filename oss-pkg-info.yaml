@@ -1,0 +1,4 @@
+Open Source Software Package:
+- name: webosOSE-nodejs-module-webos-dynaload
+  source: git://github.com/webosose/nodejs-module-webos-dynaload
+  license: Apache-2.0
