@@ -1,4 +1,4 @@
-// Copyright (c) 2010-2018 LG Electronics, Inc.
+// Copyright (c) 2010-2020 LG Electronics, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,11 +33,11 @@ static void SetFileAndDirectoryGlobals(Local<Object> global, const char* path)
 	v8::Isolate* isolate = v8::Isolate::GetCurrent();
 	bf::path pathToFile(bf::system_complete(bf::path(path)));
 	bf::path pathToParentDir(pathToFile.parent_path());
-	Handle<String> fileName = v8::String::NewFromUtf8(isolate, pathToFile.string().c_str());
+	Local<String> fileName = v8::String::NewFromUtf8(isolate, pathToFile.string().c_str());
 	global->Set(
 		v8::String::NewFromUtf8(isolate, kFileNameGlobal, v8::String::kInternalizedString),
 		fileName);
-	Handle<String> dirName = v8::String::NewFromUtf8(isolate, pathToParentDir.string().c_str());
+	Local<String> dirName = v8::String::NewFromUtf8(isolate, pathToParentDir.string().c_str());
 	global->Set(
 		v8::String::NewFromUtf8(isolate, kDirNameGlobal, v8::String::kInternalizedString),
 		dirName);
@@ -57,7 +57,7 @@ static void ClearFileAndDirectoryGlobals(Local<Object> global)
 // Load, compile and execute a JavaScript file in the current context. Used by
 // the webOS unit test framework and service launcher, as well as part of the implementation
 // of the webOS custom require function below.
-Handle<Value> IncludeScript(char const * pathToScriptSource, bool& exceptionOccurred)
+Local<Value> IncludeScript(char const * pathToScriptSource, bool& exceptionOccurred)
 {
 	exceptionOccurred = true;
 	v8::Isolate* isolate = v8::Isolate::GetCurrent();
@@ -66,17 +66,18 @@ Handle<Value> IncludeScript(char const * pathToScriptSource, bool& exceptionOccu
             v8::String::NewFromUtf8(isolate, "webOS 'include' requires a non-empty filename argument.")));
 	}
 	EscapableHandleScope scope(isolate);
-	Handle<Value> returnValue = Undefined(isolate);
+	Local<Value> returnValue = Undefined(isolate);
 	Local<String> scriptSource = createV8StringFromFile(pathToScriptSource);
-	Handle<Script> compiledScript(Script::Compile(scriptSource,
-                                                  String::NewFromUtf8(isolate, pathToScriptSource)));
+	Local<Context> currentContext = isolate->GetCurrentContext();
+	Local<Script> compiledScript = Script::Compile(currentContext,
+                                                  String::NewFromUtf8(isolate, pathToScriptSource)).ToLocalChecked();
 	if(compiledScript.IsEmpty()) {
 		return returnValue;
 	}
-	Local<Context> currentContext = isolate->GetCurrentContext();
+	//Local<Context> currentContext = isolate->GetCurrentContext();
 	Local<Object> global = currentContext->Global();
 	SetFileAndDirectoryGlobals(global, pathToScriptSource);
-	returnValue = compiledScript->Run();
+	returnValue = compiledScript->Run(currentContext).ToLocalChecked();
 	ClearFileAndDirectoryGlobals(global);
 	if(returnValue.IsEmpty()) {
 		return returnValue;
@@ -96,7 +97,8 @@ void IncludeScriptWrapper( const v8::FunctionCallbackInfo<v8::Value> & arguments
         return;
     }
     try {
-		v8::String::Utf8Value fileName(arguments[0]);
+		Isolate* isolate = v8::Isolate::GetCurrent();
+		v8::String::Utf8Value fileName(isolate, arguments[0]);
 		bool exceptionOccurred;
 		arguments.GetReturnValue().Set(IncludeScript(*fileName, exceptionOccurred));
     } catch( std::exception const & ex ) {
@@ -108,7 +110,7 @@ void IncludeScriptWrapper( const v8::FunctionCallbackInfo<v8::Value> & arguments
     }
 }
 
-static void CopyProperty(const Handle<Object>& src, const Handle<Object>& dst, const char* propertyName)
+static void CopyProperty(const Local<Object>& src, const Local<Object>& dst, const char* propertyName)
 {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     Local<String> pName(v8::String::NewFromUtf8(isolate, propertyName, v8::String::kInternalizedString));
@@ -121,7 +123,7 @@ static void CopyProperty(const Handle<Object>& src, const Handle<Object>& dst, c
 // This implementation is imperfect, though, as it can't import all the apparently global symbols
 // required from node. In particular, the node require() function is in fact a local variable, and not
 // possible to access from this function. At this point this function is only an interesting experiment.
-static Handle<Value> Require(const Handle<Value>& nativeRequire, const Handle<Value>& loader, const Handle<Array> & filePaths)
+static Local<Value> Require(const Local<Value>& nativeRequire, const Local<Value>& loader, const Local<Array> & filePaths)
 {
 	v8::Isolate* isolate = v8::Isolate::GetCurrent();
 
@@ -131,7 +133,7 @@ static Handle<Value> Require(const Handle<Value>& nativeRequire, const Handle<Va
 	
 	// create a new context with an empty global template. This would be the place we'd
 	// extend the global template with the function from node if that were possible.
-	Handle<ObjectTemplate> globalTemplate = ObjectTemplate::New(isolate);
+	Local<ObjectTemplate> globalTemplate = ObjectTemplate::New(isolate);
 	Persistent<Context> utilityContext(isolate, Context::New(isolate, NULL, globalTemplate));
 
 	// If security tokens don't match between contexts then neither context can access each
@@ -142,8 +144,8 @@ static Handle<Value> Require(const Handle<Value>& nativeRequire, const Handle<Va
 	Context::Scope utilityScope(localUtilityContext);
 
 	// Set up an exports object for use by modules.
-	Handle<ObjectTemplate> exportsTemplate = ObjectTemplate::New();
-	Local<Object> exportsInstance = exportsTemplate->NewInstance();
+	Local<ObjectTemplate> exportsTemplate = ObjectTemplate::New(isolate);
+	Local<Object> exportsInstance = exportsTemplate->NewInstance(currentContext).ToLocalChecked();;
 	Local<Object> global = localUtilityContext->Global();
 	global->Set(
             v8::String::NewFromUtf8(
@@ -185,7 +187,8 @@ static Handle<Value> Require(const Handle<Value>& nativeRequire, const Handle<Va
             return isolate->ThrowException(v8::Exception::Error(
                     v8::String::NewFromUtf8(isolate, "All elements of file paths array must be strings.")));
 		}
-		v8::String::Utf8Value fileName(fileNameObject);
+		Isolate* isolate = v8::Isolate::GetCurrent();
+		v8::String::Utf8Value fileName(isolate, fileNameObject);
 		bool exceptionOccurred;
 		SetFileAndDirectoryGlobals(global, *fileName);
 		IncludeScript(*fileName, exceptionOccurred);
@@ -220,18 +223,19 @@ static void RequireWrapper(const v8::FunctionCallbackInfo<v8::Value>& arguments)
 }
 
 
-void init(Handle<Object> target)
+void init(Local<Object> target)
 {
     Isolate* isolate = Isolate::GetCurrent();
+	Local<Context> currentContext = isolate->GetCurrentContext();
     HandleScope scope(isolate);
     Local<FunctionTemplate> includeTemplate = FunctionTemplate::New(isolate, IncludeScriptWrapper);
     target->Set(
         v8::String::NewFromUtf8(isolate, "include",  v8::String::kInternalizedString),
-        includeTemplate->GetFunction());
+        includeTemplate->GetFunction(currentContext).ToLocalChecked());
     Local<FunctionTemplate> requireTemplate = FunctionTemplate::New(isolate, RequireWrapper);
     target->Set(
         v8::String::NewFromUtf8(isolate, "require", v8::String::kInternalizedString),
-        requireTemplate->GetFunction());
+        requireTemplate->GetFunction(currentContext).ToLocalChecked());
 }
 
 NODE_MODULE(webos, init)
