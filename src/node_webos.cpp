@@ -69,7 +69,7 @@ Local<Value> IncludeScript(char const * pathToScriptSource, bool& exceptionOccur
 	Local<Value> returnValue = Undefined(isolate);
 	Local<String> scriptSource = createV8StringFromFile(pathToScriptSource);
 	Local<Context> currentContext = isolate->GetCurrentContext();
-	ScriptOrigin *scriptOrigin = new ScriptOrigin(String::NewFromUtf8(isolate, pathToScriptSource).ToLocalChecked());
+	ScriptOrigin *scriptOrigin = new ScriptOrigin(isolate, String::NewFromUtf8(isolate, pathToScriptSource).ToLocalChecked());
 	Local<Script> compiledScript(Script::Compile(currentContext, scriptSource, scriptOrigin).ToLocalChecked());
 	if(compiledScript.IsEmpty()) {
 		return returnValue;
