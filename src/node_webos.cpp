@@ -33,24 +33,24 @@ static void SetFileAndDirectoryGlobals(Local<Object> global, const char* path)
 	v8::Isolate* isolate = v8::Isolate::GetCurrent();
 	bf::path pathToFile(bf::system_complete(bf::path(path)));
 	bf::path pathToParentDir(pathToFile.parent_path());
-	Local<String> fileName = v8::String::NewFromUtf8(isolate, pathToFile.string().c_str());
-	global->Set(
-		v8::String::NewFromUtf8(isolate, kFileNameGlobal, v8::String::kInternalizedString),
+	Local<String> fileName = v8::String::NewFromUtf8(isolate, pathToFile.string().c_str()).ToLocalChecked();
+	global->Set(isolate->GetCurrentContext(),
+		v8::String::NewFromUtf8(isolate, kFileNameGlobal, v8::NewStringType::kInternalized).ToLocalChecked(),
 		fileName);
-	Local<String> dirName = v8::String::NewFromUtf8(isolate, pathToParentDir.string().c_str());
-	global->Set(
-		v8::String::NewFromUtf8(isolate, kDirNameGlobal, v8::String::kInternalizedString),
+	Local<String> dirName = v8::String::NewFromUtf8(isolate, pathToParentDir.string().c_str()).ToLocalChecked();
+	global->Set(isolate->GetCurrentContext(),
+		v8::String::NewFromUtf8(isolate, kDirNameGlobal, v8::NewStringType::kInternalized).ToLocalChecked(),
 		dirName);
 }
 
 static void ClearFileAndDirectoryGlobals(Local<Object> global)
 {
 	v8::Isolate* isolate = v8::Isolate::GetCurrent();
-	global->Set(
-		v8::String::NewFromUtf8(isolate, kFileNameGlobal, v8::String::kInternalizedString),
+	global->Set(isolate->GetCurrentContext(),
+		v8::String::NewFromUtf8(isolate, kFileNameGlobal, v8::NewStringType::kInternalized).ToLocalChecked(),
 		v8::Undefined(isolate));
-	global->Set(
-		v8::String::NewFromUtf8(isolate, kDirNameGlobal, v8::String::kInternalizedString),
+	global->Set(isolate->GetCurrentContext(),
+		v8::String::NewFromUtf8(isolate, kDirNameGlobal, v8::NewStringType::kInternalized).ToLocalChecked(),
 		v8::Undefined(isolate));
 }
 
@@ -63,14 +63,14 @@ Local<Value> IncludeScript(char const * pathToScriptSource, bool& exceptionOccur
 	v8::Isolate* isolate = v8::Isolate::GetCurrent();
 	if(!pathToScriptSource || !*pathToScriptSource ) {
         return isolate->ThrowException(v8::Exception::Error(
-            v8::String::NewFromUtf8(isolate, "webOS 'include' requires a non-empty filename argument.")));
+            v8::String::NewFromUtf8(isolate, "webOS 'include' requires a non-empty filename argument.").ToLocalChecked()));
 	}
 	EscapableHandleScope scope(isolate);
 	Local<Value> returnValue = Undefined(isolate);
 	Local<String> scriptSource = createV8StringFromFile(pathToScriptSource);
 	Local<Context> currentContext = isolate->GetCurrentContext();
-	Local<Script> compiledScript = Script::Compile(currentContext,
-                                                  String::NewFromUtf8(isolate, pathToScriptSource)).ToLocalChecked();
+	ScriptOrigin *scriptOrigin = new ScriptOrigin(isolate, String::NewFromUtf8(isolate, pathToScriptSource).ToLocalChecked());
+	Local<Script> compiledScript(Script::Compile(currentContext, scriptSource, scriptOrigin).ToLocalChecked());
 	if(compiledScript.IsEmpty()) {
 		return returnValue;
 	}
@@ -93,7 +93,7 @@ void IncludeScriptWrapper( const v8::FunctionCallbackInfo<v8::Value> & arguments
     v8::Isolate* isolate = arguments.GetIsolate();
     if (arguments.Length() != 1) {
         arguments.GetReturnValue().Set(isolate->ThrowException(v8::Exception::Error(
-            v8::String::NewFromUtf8(isolate, "Invalid number of parameters, 1 expected."))));
+            v8::String::NewFromUtf8(isolate, "Invalid number of parameters, 1 expected.").ToLocalChecked())));
         return;
     }
     try {
@@ -103,19 +103,21 @@ void IncludeScriptWrapper( const v8::FunctionCallbackInfo<v8::Value> & arguments
 		arguments.GetReturnValue().Set(IncludeScript(*fileName, exceptionOccurred));
     } catch( std::exception const & ex ) {
         arguments.GetReturnValue().Set(isolate->ThrowException(v8::Exception::Error(
-            v8::String::NewFromUtf8(isolate, ex.what()))));
+            v8::String::NewFromUtf8(isolate, ex.what()).ToLocalChecked())));
     } catch( ... ) {
         arguments.GetReturnValue().Set(isolate->ThrowException(v8::Exception::Error(
-            v8::String::NewFromUtf8(isolate, "Native function threw an unknown exception."))));
+            v8::String::NewFromUtf8(isolate, "Native function threw an unknown exception.").ToLocalChecked())));
     }
 }
 
 static void CopyProperty(const Local<Object>& src, const Local<Object>& dst, const char* propertyName)
 {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
-    Local<String> pName(v8::String::NewFromUtf8(isolate, propertyName, v8::String::kInternalizedString));
-	Local<Value> v = src->Get(pName);
-	dst->Set(pName, v);
+    Local<String> pName(v8::String::NewFromUtf8(isolate, propertyName, v8::NewStringType::kInternalized).ToLocalChecked());
+    Local<Value> v;
+    if(src->Get(isolate->GetCurrentContext(), pName).ToLocal(&v)) {
+	dst->Set(isolate->GetCurrentContext(), pName, v);
+    }
 }
 
 // Function that creates a new JavaScript context and loads, compiles and executes a list of source
@@ -147,29 +149,29 @@ static Local<Value> Require(const Local<Value>& nativeRequire, const Local<Value
 	Local<ObjectTemplate> exportsTemplate = ObjectTemplate::New(isolate);
 	Local<Object> exportsInstance = exportsTemplate->NewInstance(currentContext).ToLocalChecked();;
 	Local<Object> global = localUtilityContext->Global();
-	global->Set(
+	global->Set(currentContext,
             v8::String::NewFromUtf8(
-                isolate, "exports",    v8::String::kInternalizedString),
+                isolate, "exports",    v8::NewStringType::kInternalized).ToLocalChecked(),
             exportsInstance);
-	global->Set(
+	global->Set(currentContext,
             v8::String::NewFromUtf8(
-                isolate, "global",     v8::String::kInternalizedString),
+                isolate, "global",     v8::NewStringType::kInternalized).ToLocalChecked(),
             global);
-	global->Set(
+	global->Set(currentContext,
             v8::String::NewFromUtf8(
-                isolate, "globals",    v8::String::kInternalizedString),
+                isolate, "globals",    v8::NewStringType::kInternalized).ToLocalChecked(),
             currentGlobal);
-	global->Set(
+	global->Set(currentContext,
             v8::String::NewFromUtf8(
-                isolate, "root",       v8::String::kInternalizedString),
+                isolate, "root",       v8::NewStringType::kInternalized).ToLocalChecked(),
             currentGlobal);
-	global->Set(
+	global->Set(currentContext,
             v8::String::NewFromUtf8(
-                isolate, "MojoLoader", v8::String::kInternalizedString),
+                isolate, "MojoLoader", v8::NewStringType::kInternalized).ToLocalChecked(),
             loader);
-	global->Set(
+	global->Set(currentContext,
             v8::String::NewFromUtf8(
-                isolate, "require",    v8::String::kInternalizedString),
+                isolate, "require",    v8::NewStringType::kInternalized).ToLocalChecked(),
             nativeRequire);
 	
 	// copy a number of useful properties from the loading node context.
@@ -182,10 +184,10 @@ static Local<Value> Require(const Local<Value>& nativeRequire, const Local<Value
 	// load the list of files, stopping if any produce an error
 	uint32_t length = filePaths->Length();
 	for(uint32_t i = 0; i < length; ++i) {
-		Local<Value> fileNameObject(filePaths->Get(i));
+		Local<Value> fileNameObject(filePaths->Get(currentContext, i).ToLocalChecked());
 		if (!fileNameObject->IsString()) {
-            return isolate->ThrowException(v8::Exception::Error(
-                    v8::String::NewFromUtf8(isolate, "All elements of file paths array must be strings.")));
+		    return isolate->ThrowException(v8::Exception::Error(
+			    v8::String::NewFromUtf8(isolate, "All elements of file paths array must be strings.").ToLocalChecked()));
 		}
 		Isolate* isolate = v8::Isolate::GetCurrent();
 		v8::String::Utf8Value fileName(isolate, fileNameObject);
@@ -205,17 +207,17 @@ static void RequireWrapper(const v8::FunctionCallbackInfo<v8::Value>& arguments)
     Isolate* isolate = Isolate::GetCurrent();
     if (arguments.Length() != 3) {
         arguments.GetReturnValue().Set(isolate->ThrowException(Exception::Error(
-                                  String::NewFromUtf8(isolate, "Invalid number of parameters, 3 expected."))));
+                                  String::NewFromUtf8(isolate, "Invalid number of parameters, 3 expected.").ToLocalChecked())));
         return;
     }
 	if (!arguments[0]->IsFunction()) {
         arguments.GetReturnValue().Set(isolate->ThrowException(Exception::Error(
-                              String::NewFromUtf8(isolate, "Argument 2 must be an function."))));
+                              String::NewFromUtf8(isolate, "Argument 2 must be an function.").ToLocalChecked())));
         return;
 	}
 	if (!arguments[2]->IsArray()) {
         arguments.GetReturnValue().Set(isolate->ThrowException(Exception::Error(
-                              String::NewFromUtf8(isolate, "Argument 3 must be an array."))));
+                              String::NewFromUtf8(isolate, "Argument 3 must be an array.").ToLocalChecked())));
         return;
 	}
 	Local<Array> fileList = Local<Array>::Cast(arguments[2]);
@@ -229,12 +231,12 @@ void init(Local<Object> target)
 	Local<Context> currentContext = isolate->GetCurrentContext();
     HandleScope scope(isolate);
     Local<FunctionTemplate> includeTemplate = FunctionTemplate::New(isolate, IncludeScriptWrapper);
-    target->Set(
-        v8::String::NewFromUtf8(isolate, "include",  v8::String::kInternalizedString),
+    target->Set(currentContext,
+        v8::String::NewFromUtf8(isolate, "include", v8::NewStringType::kInternalized).ToLocalChecked(),
         includeTemplate->GetFunction(currentContext).ToLocalChecked());
     Local<FunctionTemplate> requireTemplate = FunctionTemplate::New(isolate, RequireWrapper);
-    target->Set(
-        v8::String::NewFromUtf8(isolate, "require", v8::String::kInternalizedString),
+    target->Set(currentContext,
+        v8::String::NewFromUtf8(isolate, "require", v8::NewStringType::kInternalized).ToLocalChecked(),
         requireTemplate->GetFunction(currentContext).ToLocalChecked());
 }
 
